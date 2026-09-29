@@ -1,0 +1,21 @@
+ARG UBI_VERSION=8
+FROM registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest
+
+RUN dnf install -y \
+    gcc gcc-c++ make cmake \
+    perl pkgconf-pkg-config \
+    curl ca-certificates \
+    tar gzip xz \
+    && dnf clean all
+
+ENV RUSTUP_HOME=/opt/rustup
+ENV CARGO_HOME=/opt/cargo
+ENV PATH="/opt/cargo/bin:${PATH}"
+
+WORKDIR /volume
+
+RUN curl --proto '=https' --tlsv1.2 -sSf \
+    https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain nightly
+
+RUN rustup component add rustfmt clippy

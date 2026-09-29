@@ -1,0 +1,98 @@
+name: Build RED OS Rust images
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force_stable:
+        description: Rebuild stable images even when inputs are unchanged
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - ubi: 7
+            channel: stable
+            dockerfile: Dockerfile.stable
+            tags: hexq/redos-rust:ubi7-stable
+          - ubi: 7
+            channel: nightly
+            dockerfile: Dockerfile.nightly
+            tags: hexq/redos-rust:ubi7-nightly
+          - ubi: 8
+            channel: stable
+            dockerfile: Dockerfile.stable
+            tags: |
+              hexq/redos-rust:ubi8-stable
+              hexq/redos-rust:stable
+          - ubi: 8
+            channel: nightly
+            dockerfile: Dockerfile.nightly
+            tags: |
+              hexq/redos-rust:ubi8-nightly
+              hexq/redos-rust:nightly
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Check stable image inputs
+        id: stable
+        if: matrix.channel == 'stable'
+        env:
+          UBI_VERSION: ${{ matrix.ubi }}
+          IMAGE: hexq/redos-rust:ubi${{ matrix.ubi }}-stable
+          FORCE_STABLE: ${{ inputs.force_stable }}
+        run: |
+          set -euo pipefail
+
+          base_digest=$(docker buildx imagetools inspect "registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest" --format '{{json .Manifest}}' | jq -r '.digest')
+          rust_manifest_sha=$(curl --fail --silent --show-error --location https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256 | awk '{print $1}')
+          dockerfile_sha=$(sha256sum Dockerfile.stable | awk '{print $1}')
+          fingerprint=$(printf '%s\n' "$base_digest" "$rust_manifest_sha" "$dockerfile_sha" | sha256sum | awk '{print $1}')
+
+          if [[ ! "$base_digest" =~ ^sha256:[0-9a-f]{64}$ || ! "$rust_manifest_sha" =~ ^[0-9a-f]{64}$ ]]; then
+            echo 'Invalid base digest or Rust manifest checksum' >&2
+            exit 1
+          fi
+
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+          published_fingerprint=''
+          if image_config=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image}}' 2>/dev/null); then
+            published_fingerprint=$(jq -r '.config.Labels["org.redos-rust.build-fingerprint"] // empty' <<< "$image_config")
+          fi
+
+          if [[ "$FORCE_STABLE" == 'true' || "$fingerprint" != "$published_fingerprint" ]]; then
+            echo 'build=true' >> "$GITHUB_OUTPUT"
+            echo "Building $IMAGE: input fingerprint changed or build forced"
+          else
+            echo 'build=false' >> "$GITHUB_OUTPUT"
+            echo "Skipping $IMAGE: input fingerprint unchanged"
+          fi
+
+      - uses: docker/login-action@v3
+        if: matrix.channel == 'nightly' || steps.stable.outputs.build == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        if: matrix.channel == 'nightly' || steps.stable.outputs.build == 'true'
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          pull: true
+          build-args: |
+            UBI_VERSION=${{ matrix.ubi }}
+            BUILD_FINGERPRINT=${{ steps.stable.outputs.fingerprint }}
+          push: true
+          tags: ${{ matrix.tags }}
