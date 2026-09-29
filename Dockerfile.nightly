@@ -1,12 +1,13 @@
 ARG UBI_VERSION=8
 FROM registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest
 
-RUN dnf install -y \
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
     gcc gcc-c++ make cmake \
     perl pkgconf-pkg-config \
     curl ca-certificates \
     tar gzip xz \
-    && dnf clean all
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
 
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
@@ -16,6 +17,8 @@ WORKDIR /volume
 
 RUN curl --proto '=https' --tlsv1.2 -sSf \
     https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain nightly
+    | sh -s -- -y --profile minimal --default-toolchain nightly \
+    && rustup component add rustfmt clippy \
+    && rm -rf "${RUSTUP_HOME}"/toolchains/*/share/doc
 
-RUN rustup component add rustfmt clippy
+LABEL org.opencontainers.image.source="https://github.com/hexqnt/redos-rust"
