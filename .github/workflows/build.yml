@@ -2,7 +2,7 @@ name: Build RED OS Rust images
 
 on:
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "6 5 * * *"
   workflow_dispatch:
     inputs:
       force_stable:
