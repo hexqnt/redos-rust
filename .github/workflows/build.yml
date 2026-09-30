@@ -13,7 +13,67 @@ on:
     branches: [main]
 
 jobs:
+  base:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubi: [7, 8]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Check base image inputs
+        id: base
+        env:
+          UBI_VERSION: ${{ matrix.ubi }}
+          IMAGE: hexq/redos-build-base:ubi${{ matrix.ubi }}
+        run: |
+          set -euo pipefail
+
+          upstream_digest=$(docker buildx imagetools inspect "registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest" --format '{{json .Manifest}}' | jq -r '.digest')
+          dockerfile_sha=$(sha256sum Dockerfile.base | awk '{print $1}')
+          if [[ ! "$upstream_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo 'Invalid UBI digest' >&2
+            exit 1
+          fi
+          fingerprint=$(printf '%s\n' "$upstream_digest" "$dockerfile_sha" | sha256sum | awk '{print $1}')
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+          published_fingerprint=''
+          if image_config=$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Image}}' 2>/dev/null); then
+            published_fingerprint=$(jq -r '.config.Labels["org.redos-rust.build-fingerprint"] // empty' <<< "$image_config")
+          fi
+
+          if [[ "$fingerprint" != "$published_fingerprint" ]]; then
+            echo 'build=true' >> "$GITHUB_OUTPUT"
+            echo "Building $IMAGE: base inputs changed"
+          else
+            echo 'build=false' >> "$GITHUB_OUTPUT"
+            echo "Skipping $IMAGE: base inputs unchanged"
+          fi
+
+      - uses: docker/login-action@v4
+        if: steps.base.outputs.build == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        if: steps.base.outputs.build == 'true'
+        with:
+          context: .
+          file: Dockerfile.base
+          pull: true
+          build-args: |
+            UBI_VERSION=${{ matrix.ubi }}
+            BUILD_FINGERPRINT=${{ steps.base.outputs.fingerprint }}
+          push: true
+          tags: hexq/redos-build-base:ubi${{ matrix.ubi }}
+
   build:
+    needs: base
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -54,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          base_digest=$(docker buildx imagetools inspect "registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest" --format '{{json .Manifest}}' | jq -r '.digest')
+          base_digest=$(docker buildx imagetools inspect "hexq/redos-build-base:ubi${UBI_VERSION}" --format '{{json .Manifest}}' | jq -r '.digest')
           rust_manifest_sha=$(curl --fail --silent --show-error --location https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256 | awk '{print $1}')
           dockerfile_sha=$(sha256sum Dockerfile.stable | awk '{print $1}')
           fingerprint=$(printf '%s\n' "$base_digest" "$rust_manifest_sha" "$dockerfile_sha" | sha256sum | awk '{print $1}')

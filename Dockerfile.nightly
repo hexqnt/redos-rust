@@ -1,13 +1,5 @@
 ARG UBI_VERSION=8
-FROM registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest
-
-RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
-    gcc gcc-c++ make cmake \
-    perl pkgconf-pkg-config \
-    curl ca-certificates \
-    tar gzip xz \
-    && dnf clean all \
-    && rm -rf /var/cache/dnf
+FROM hexq/redos-build-base:ubi${UBI_VERSION}
 
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo

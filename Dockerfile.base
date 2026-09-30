@@ -1,0 +1,89 @@
+ARG UBI_VERSION=8
+FROM registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest AS runtime
+
+RUN dnf install -y --setopt=install_weak_deps=False --nodocs \
+  gcc gcc-c++ make \
+  perl pkgconf-pkg-config \
+  curl ca-certificates \
+  tar gzip xz \
+  && dnf clean all \
+  && rm -rf /var/cache/dnf
+
+FROM runtime AS tools
+
+ARG CMAKE_VERSION=4.4.3
+ARG CMAKE_BINARY_SHA256=d6c83076c575bc00b823522ac974bda66d0af05d6ddc30e739c12385cf32c6cc
+ARG CMAKE_SOURCE_SHA256=c46400618b4f1f2b43507f24fb22f3ae830c3416cf23b776e16e1d413aa892f0
+RUN set -eu; \
+  curl --fail --silent --show-error --location \
+  "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+  --output /tmp/cmake-bin.tar.gz; \
+  echo "${CMAKE_BINARY_SHA256}  /tmp/cmake-bin.tar.gz" | sha256sum --check; \
+  mkdir -p /tmp/cmake-bin; \
+  tar -xzf /tmp/cmake-bin.tar.gz -C /tmp/cmake-bin --strip-components=1; \
+  if /tmp/cmake-bin/bin/cmake --version >/dev/null 2>&1 \
+  && /tmp/cmake-bin/bin/ctest --version >/dev/null 2>&1 \
+  && /tmp/cmake-bin/bin/cpack --version >/dev/null 2>&1; then \
+  mv /tmp/cmake-bin /opt/cmake; \
+  else \
+  dnf install -y --setopt=install_weak_deps=False --nodocs libcurl-devel zlib-devel; \
+  dnf clean all; \
+  rm -rf /var/cache/dnf; \
+  curl --fail --silent --show-error --location \
+  "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}.tar.gz" \
+  --output /tmp/cmake-src.tar.gz; \
+  echo "${CMAKE_SOURCE_SHA256}  /tmp/cmake-src.tar.gz" | sha256sum --check; \
+  mkdir -p /tmp/cmake-src; \
+  tar -xzf /tmp/cmake-src.tar.gz -C /tmp/cmake-src --strip-components=1; \
+  cd /tmp/cmake-src; \
+  ./bootstrap --prefix=/opt/cmake --parallel=2 -- \
+  -DBUILD_TESTING=OFF -DCMAKE_USE_SYSTEM_CURL=ON -DCMAKE_USE_OPENSSL=OFF; \
+  make -j2; \
+  make install; \
+  fi; \
+  cd /; \
+  rm -rf /tmp/cmake-bin.tar.gz /tmp/cmake-bin /tmp/cmake-src.tar.gz /tmp/cmake-src \
+  /opt/cmake/doc /opt/cmake/man
+
+ARG NINJA_VERSION=1.13.2
+ARG NINJA_BINARY_SHA256=5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6
+ARG NINJA_SOURCE_SHA256=974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17
+RUN set -eu; \
+  curl --fail --silent --show-error --location \
+  "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip" \
+  --output /tmp/ninja-bin.zip; \
+  echo "${NINJA_BINARY_SHA256}  /tmp/ninja-bin.zip" | sha256sum --check; \
+  mkdir -p /tmp/ninja-bin /opt/ninja/bin; \
+  cd /tmp/ninja-bin; \
+  /opt/cmake/bin/cmake -E tar xf /tmp/ninja-bin.zip; \
+  if /tmp/ninja-bin/ninja --version >/dev/null 2>&1; then \
+  install -m 0755 /tmp/ninja-bin/ninja /opt/ninja/bin/ninja; \
+  else \
+  curl --fail --silent --show-error --location \
+  "https://github.com/ninja-build/ninja/archive/refs/tags/v${NINJA_VERSION}.tar.gz" \
+  --output /tmp/ninja-src.tar.gz; \
+  echo "${NINJA_SOURCE_SHA256}  /tmp/ninja-src.tar.gz" | sha256sum --check; \
+  mkdir -p /tmp/ninja-src; \
+  tar -xzf /tmp/ninja-src.tar.gz -C /tmp/ninja-src --strip-components=1; \
+  /opt/cmake/bin/cmake -S /tmp/ninja-src -B /tmp/ninja-build \
+  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF; \
+  /opt/cmake/bin/cmake --build /tmp/ninja-build --parallel 2 --target ninja; \
+  install -m 0755 /tmp/ninja-build/ninja /opt/ninja/bin/ninja; \
+  fi; \
+  cd /; \
+  rm -rf /tmp/ninja-bin.zip /tmp/ninja-bin /tmp/ninja-src.tar.gz \
+  /tmp/ninja-src /tmp/ninja-build
+
+FROM runtime
+
+COPY --from=tools /opt/cmake /opt/cmake
+COPY --from=tools /opt/ninja /opt/ninja
+
+ENV PATH="/opt/ninja/bin:/opt/cmake/bin:${PATH}"
+WORKDIR /volume
+
+RUN cmake --version && ctest --version && cpack --version && ninja --version
+
+ARG BUILD_FINGERPRINT
+LABEL org.redos-rust.build-fingerprint=$BUILD_FINGERPRINT
+LABEL org.opencontainers.image.source="https://github.com/hexqnt/redos-rust"
