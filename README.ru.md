@@ -36,6 +36,8 @@ Ninja:
 
 ## Использование
 
+Workflow GitHub Actions настраивает доверие к сертификатам реестра RED SOFT отдельно для CLI Buildx и BuildKit. Проверка TLS остаётся включённой. Источники сертификатов, отпечатки и порядок обновления описаны в [документации сертификатов](.github/certs/README.md).
+
 ```sh
 docker pull hexq/redos-rust:ubi8-stable
 docker run --rm \

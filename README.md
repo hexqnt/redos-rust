@@ -21,6 +21,8 @@ Each stable/nightly pair shares a build base with GCC, G++, Make, pkgconf, CMake
 
 ## Usage
 
+The GitHub Actions workflow configures CA certificates for the RED SOFT registry in both the Buildx CLI and BuildKit. TLS verification remains enabled. Certificate sources, fingerprints, and renewal notes are in [the certificate documentation](.github/certs/README.md).
+
 ```sh
 docker pull hexq/redos-rust:ubi8-stable
 docker run --rm \

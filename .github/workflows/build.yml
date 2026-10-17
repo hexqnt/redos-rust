@@ -23,6 +23,10 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: docker/setup-buildx-action@v4
+        with:
+          buildkitd-config-inline: |
+            [registry."registry.red-soft.ru"]
+              ca = ["${{ github.workspace }}/.github/certs/red-soft-ca.pem"]
 
       - name: Check base image inputs
         id: base
@@ -32,7 +36,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          upstream_digest=$(docker buildx imagetools inspect "registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest" --format '{{json .Manifest}}' | jq -r '.digest')
+          ca_bundle="$RUNNER_TEMP/red-soft-ca-bundle.pem"
+          cat /etc/ssl/certs/ca-certificates.crt .github/certs/red-soft-ca.pem > "$ca_bundle"
+          upstream_digest=$(SSL_CERT_FILE="$ca_bundle" docker buildx imagetools inspect "registry.red-soft.ru/ubi${UBI_VERSION}/ubi:latest" --format '{{json .Manifest}}' | jq -r '.digest')
           dockerfile_sha=$(sha256sum Dockerfile.base | awk '{print $1}')
           if [[ ! "$upstream_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo 'Invalid UBI digest' >&2
