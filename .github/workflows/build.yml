@@ -68,6 +68,9 @@ jobs:
 
       - uses: docker/build-push-action@v7
         if: steps.base.outputs.build == 'true'
+        env:
+          # Токен реестра запрашивает клиент Buildx на runner, отдельно от BuildKit.
+          SSL_CERT_FILE: ${{ runner.temp }}/red-soft-ca-bundle.pem
         with:
           context: .
           file: Dockerfile.base
